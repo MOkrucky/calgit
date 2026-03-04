@@ -49,7 +49,7 @@ Publisher: MOkrucky
 
 - Snapshot documents are opened as read-only.
 - If no repository is found through the VS Code Git API, Calgit falls back to Git CLI detection.
-- Commit history is branch-specific and reflects the currently checked-out branch.
+- Commit history is collected across local and remote branches (`git log --all`) for the active file.
 
 
 ## Release Notes
