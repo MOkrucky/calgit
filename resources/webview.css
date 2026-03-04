@@ -1,249 +1,451 @@
-	body {
-		font-family: var(--vscode-font-family);
-		font-size: var(--vscode-font-size);
-		color: var(--vscode-foreground);
-		background: var(--vscode-editor-background);
-		padding: 8px;
-	}
-	#status {
-		margin-bottom: 10px;
-		opacity: 0.9;
-	}
-	#status.error {
-		color: var(--vscode-errorForeground);
-	}
-	.calendarShell {
-		border: 1px solid var(--vscode-panel-border);
-		border-radius: 8px;
-		padding: 8px;
-		background: var(--vscode-editorWidget-background);
-	}
-	.calendarHeader {
-		display: grid;
-		grid-template-columns: 28px 1fr 28px auto;
-		align-items: center;
-		margin-bottom: 8px;
-		column-gap: 8px;
-	}
-	#monthLabel {
-		text-align: center;
-		font-weight: 600;
-	}
-	.navButton {
-		height: 28px;
-		border: 1px solid var(--vscode-button-border);
-		background: var(--vscode-button-secondaryBackground);
-		color: var(--vscode-button-secondaryForeground);
-		border-radius: 6px;
-		cursor: pointer;
-	}
-	.navButton:hover {
-		background: var(--vscode-button-secondaryHoverBackground);
-	}
-	#reloadHistoryButton {
-		height: 28px;
-		border: 1px solid var(--vscode-button-border);
-		background: var(--vscode-button-background);
-		color: var(--vscode-button-foreground);
-		border-radius: 6px;
-		cursor: pointer;
-		padding: 0 10px;
-	}
-	#reloadHistoryButton:hover {
-		background: var(--vscode-button-hoverBackground);
-	}
-	.weekdayRow {
-		display: grid;
-		grid-template-columns: repeat(7, minmax(0, 1fr));
-		margin-bottom: 6px;
-	}
-	.weekdayCell {
-		text-align: center;
-		opacity: 0.8;
-		font-size: 11px;
-	}
-	.calendarGrid {
-		display: grid;
-		grid-template-columns: repeat(7, minmax(0, 1fr));
-		gap: 4px;
-	}
-	.dayCell {
-		min-height: 40px;
-		border: 1px solid var(--vscode-panel-border);
-		border-radius: 6px;
-		background: var(--vscode-editor-background);
-		cursor: pointer;
-		padding: 4px;
-		text-align: left;
-		display: flex;
-		flex-direction: column;
-	}
-	.dayCell:disabled {
-		cursor: default;
-		opacity: 0.5;
-	}
-	.dayCell.outsideMonth {
-		opacity: 0.45;
-	}
-	.dayCell.today {
-		border-color: var(--vscode-focusBorder);
-	}
-	.dayCell.hasCommits {
-		background: var(--vscode-list-hoverBackground);
-	}
-	.dayCell.selected {
-		border-color: var(--vscode-focusBorder);
-		background: var(--vscode-list-activeSelectionBackground);
-		color: var(--vscode-list-activeSelectionForeground);
-	}
-	.dayHeader {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-	.dayNumber {
-		font-size: 11px;
-	}
-	.commitCount {
-		font-size: 10px;
-		padding: 0 4px;
-		border-radius: 10px;
-		background: var(--vscode-badge-background);
-		color: var(--vscode-badge-foreground);
-	}
-	.dayBranch {
-		font-size: 9px;
-		margin-top: 1px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		opacity: 0.7;
-		color: var(--vscode-gitDecoration-modifiedResourceForeground);
-	}
-	#commitInfo {
-		margin-top: 10px;
-		border: 1px solid var(--vscode-panel-border);
-		border-radius: 8px;
-		padding: 8px;
-		background: var(--vscode-editor-background);
-	}
-	#commitInfo.empty {
-		opacity: 0.75;
-	}
-	.infoTitle {
-		font-weight: 600;
-		margin-bottom: 6px;
-	}
-	.infoRow {
-		margin: 2px 0;
-		word-break: break-word;
-	}
-	.infoLabel {
-		opacity: 0.75;
-		margin-right: 6px;
-	}
-	#dayCommitList {
-		margin-top: 8px;
-		border: 1px solid var(--vscode-panel-border);
-		border-radius: 8px;
-		padding: 8px;
-		background: var(--vscode-editor-background);
-	}
-	#dayCommitList.empty {
-		opacity: 0.75;
-	}
-	.dayCommitTitle {
-		font-weight: 600;
-		margin-bottom: 6px;
-	}
-	.dayCommitItem {
-		border: 1px solid var(--vscode-panel-border);
-		background: var(--vscode-editor-background);
-		color: var(--vscode-foreground);
-		border-radius: 6px;
-		padding: 6px 8px;
-		margin: 4px 0;
-	}
-	.dayCommitItem.active {
-		border-color: var(--vscode-focusBorder);
-		background: var(--vscode-list-hoverBackground);
-	}
-	.commitItemBody {
-		cursor: pointer;
-		padding-bottom: 4px;
-	}
-	.commitItemBody:hover {
-		opacity: 0.85;
-	}
-	.dayCommitMeta {
-		font-size: 11px;
-		opacity: 0.85;
-		margin-bottom: 2px;
-	}
-	.dayCommitMessage {
-		font-size: 12px;
-		word-break: break-word;
-	}
-	.commitActions {
-		display: flex;
-		gap: 4px;
-		margin-top: 6px;
-		flex-wrap: wrap;
-	}
-	.commitActionBtn {
-		font-size: 11px;
-		padding: 2px 6px;
-		border: 1px solid var(--vscode-panel-border);
-		background: var(--vscode-editor-background);
-		color: var(--vscode-foreground);
-		border-radius: 4px;
-		cursor: pointer;
-		white-space: nowrap;
-		opacity: 0.85;
-		transition: opacity 0.1s, border-color 0.1s;
-	}
-	.commitActionBtn:hover {
-		opacity: 1;
-		border-color: var(--vscode-focusBorder);
-	}
-	.commitActionBtn:active {
-		opacity: 0.6;
-	}
-		.contextMenu {
-		position: fixed;
-		z-index: 9999;
-		min-width: 220px;
-		border: 1px solid var(--vscode-menu-border);
-		background: var(--vscode-menu-background);
-		color: var(--vscode-menu-foreground);
-		border-radius: 6px;
-		padding: 4px;
-		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
-	}
-	.contextMenu.hidden {
-		display: none;
-	}
-	.contextMenuItem {
-		display: block;
-		width: 100%;
-		text-align: left;
-		background: transparent;
-		border: 0;
-		color: inherit;
-		padding: 6px 8px;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-	.contextMenuItem:hover:not(:disabled) {
-		background: var(--vscode-menu-selectionBackground);
-		color: var(--vscode-menu-selectionForeground);
-	}
-	.contextMenuItem:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
-	.contextMenuHint {
-		padding: 4px 8px;
-		font-size: 11px;
-		opacity: 0.75;
-	}
+body {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  padding: 8px;
+}
+
+#status {
+  margin-bottom: 10px;
+  opacity: 0.9;
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#status.error {
+  color: var(--vscode-errorForeground);
+}
+
+#status.loading {
+  opacity: 0.95;
+}
+
+#status.loading::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  border: 2px solid var(--vscode-progressBar-background);
+  border-top-color: transparent;
+  animation: calgit-spin 0.8s linear infinite;
+}
+
+.calendarShell {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--vscode-editorWidget-background);
+}
+
+.calendarHeader {
+  display: grid;
+  grid-template-columns: 28px 1fr 28px auto;
+  align-items: center;
+  margin-bottom: 8px;
+  column-gap: 8px;
+}
+
+#monthLabel {
+  text-align: center;
+  font-weight: 600;
+}
+
+.navButton {
+  height: 28px;
+  border: 1px solid var(--vscode-button-border);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.navButton:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+#reloadHistoryButton {
+  height: 28px;
+  border: 1px solid var(--vscode-button-border);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+#reloadHistoryButton:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.weekdayRow {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin-bottom: 6px;
+}
+
+.weekdayCell {
+  text-align: center;
+  opacity: 0.8;
+  font-size: 11px;
+}
+
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dayCell {
+  aspect-ratio: 1 / 1;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  background: var(--vscode-editor-background);
+  cursor: pointer;
+  padding: 6px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.dayCell:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.dayCell.outsideMonth {
+  opacity: 0.45;
+}
+
+.dayCell.today {
+  border-color: var(--vscode-focusBorder);
+}
+
+.dayCell.hasCommits {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.dayCell.selected {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.dayHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dayNumber {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--vscode-descriptionForeground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2ch;
+  text-align: center;
+}
+
+.commitCount {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.dayBranch {
+  font-size: 10px;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+  color: var(--vscode-gitDecoration-modifiedResourceForeground);
+}
+
+.dayCell.today .dayNumber {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+}
+
+#compareState {
+  margin-top: 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--vscode-editor-background);
+}
+
+#compareState.empty {
+  opacity: 0.75;
+}
+
+.compareStateTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.compareStateRow {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0;
+  background: var(--vscode-editorWidget-background);
+}
+
+.compareStateRow.selected {
+  border-color: var(--vscode-focusBorder);
+}
+
+.compareStateRow.base {
+  border-color: var(--vscode-gitDecoration-modifiedResourceForeground);
+}
+
+.compareStateLabel {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.compareStateSummary {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.compareStateMessage {
+  font-size: 12px;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.compareStateHint {
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.infoTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.infoRow {
+  margin: 2px 0;
+  word-break: break-word;
+}
+
+.infoLabel {
+  opacity: 0.75;
+  margin-right: 6px;
+}
+
+#dayCommitList {
+  margin-top: 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--vscode-editor-background);
+}
+
+#dayCommitList.empty {
+  opacity: 0.75;
+}
+
+.dayCommitTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.dayCommitItem {
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+
+.dayCommitItem.active {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-hoverBackground);
+}
+
+.dayCommitItem.compareBase {
+  border-color: var(--vscode-gitDecoration-modifiedResourceForeground);
+}
+
+.dayCommitDetails {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.dayCommitDetailsTitle {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.dayCommitDetails .infoRow {
+  margin: 1px 0;
+  font-size: 11px;
+}
+
+.commitItemBody {
+  cursor: pointer;
+  padding-bottom: 4px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.commitItemBody:hover {
+  opacity: 0.85;
+}
+
+.commitItemBody:focus-visible {
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.dayCommitMeta {
+  font-size: 11px;
+  opacity: 0.85;
+  margin-bottom: 2px;
+}
+
+.dayCommitMessage {
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.dayCommitTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.commitTag {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-input-background);
+}
+
+.branchTag {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground);
+}
+
+.scopeCurrent {
+  color: var(--vscode-gitDecoration-addedResourceForeground);
+}
+
+.scopeOther {
+  opacity: 0.85;
+}
+
+.stateTag {
+  font-weight: 600;
+}
+
+.openTag {
+  border-color: var(--vscode-focusBorder);
+}
+
+.baseTag {
+  border-color: var(--vscode-gitDecoration-modifiedResourceForeground);
+  color: var(--vscode-gitDecoration-modifiedResourceForeground);
+}
+
+.commitActions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.commitActionBtn {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.85;
+  transition: opacity 0.1s, border-color 0.1s;
+}
+
+.commitActionBtn:hover {
+  opacity: 1;
+  border-color: var(--vscode-focusBorder);
+}
+
+.commitActionBtn:active {
+  opacity: 0.6;
+}
+
+.contextMenu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 220px;
+  border: 1px solid var(--vscode-menu-border);
+  background: var(--vscode-menu-background);
+  color: var(--vscode-menu-foreground);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.contextMenu.hidden {
+  display: none;
+}
+
+.contextMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.contextMenuItem:hover:not(:disabled) {
+  background: var(--vscode-menu-selectionBackground);
+  color: var(--vscode-menu-selectionForeground);
+}
+
+.contextMenuItem:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.contextMenuHint {
+  padding: 4px 8px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+@keyframes calgit-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

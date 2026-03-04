@@ -4,20 +4,38 @@ let displayYear = null;
 let displayMonth = null;
 let currentFileUri = null;
 let activeCommit = null;
+let activeCommitNote = '';
 let compareBaseCommit = null;
 let selectedDayKey = null;
 let selectedDayCommits = [];
+let activeRequestId = 0;
 const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function setStatus(text, level = 'info') {
    const status = document.getElementById('status');
    status.textContent = text;
-   status.className = level === 'error' ? 'error' : '';
+   if (level === 'error') {
+      status.className = 'error';
+      return;
+   }
+   if (level === 'loading') {
+      status.className = 'loading';
+      return;
+   }
+   status.className = '';
+}
+
+function isStaleRequestMessage(msg) {
+   return typeof msg?.requestId === 'number' && msg.requestId !== activeRequestId;
 }
 
 function shortHash(hash) {
    return String(hash || '').slice(0, 7);
+}
+
+function isSameCommit(left, right) {
+   return !!left && !!right && left.hash === right.hash && left.fileUri === right.fileUri;
 }
 
 function sortCommitsNewestFirst(commits) {
@@ -60,10 +78,23 @@ function indexCommits(commits) {
 function parseBranchFromRefs(refs) {
    if (!refs) return '';
    const headMatch = refs.match(/HEAD -> ([^,]+)/);
-   if (headMatch) return headMatch[1].trim();
    const parts = refs.split(',').map(s => s.trim()).filter(Boolean);
-   const local = parts.find(p => !p.startsWith('origin/') && !p.startsWith('tag:') && p !== 'HEAD');
-   return local || '';
+   const preferredHead = headMatch ? headMatch[1].trim() : '';
+   const local = parts.find(p => !p.startsWith('origin/') && !p.startsWith('tag:') && p !== 'HEAD' && !p.startsWith('HEAD -> '));
+   if (local) return local;
+   const remote = parts.find(p => p.startsWith('origin/') && p !== 'origin/HEAD');
+   if (remote) return remote;
+   return preferredHead;
+}
+
+function getCommitBranchLabel(commit) {
+   return parseBranchFromRefs(commit?.refs || '');
+}
+
+function formatBranchScope(commit) {
+   if (!commit || !commit.branchScope) return '';
+   const currentName = (commit.currentBranchName && commit.currentBranchName !== 'HEAD') ? commit.currentBranchName : 'current branch';
+   return commit.branchScope === 'current' ? 'Current (' + currentName + ')' : 'Other branch';
 }
 
 function renderWeekdays() {
@@ -87,7 +118,7 @@ function renderCalendar() {
    grid.innerHTML = '';
 
    const todayKey = toDateKey(new Date());
-   const firstWeekday = new Date(displayYear, displayMonth, 1).getDay();
+   const firstWeekday = (new Date(displayYear, displayMonth, 1).getDay() + 6) % 7;
    const daysInMonth = new Date(displayYear, displayMonth + 1, 0).getDate();
    const prevMonthDays = new Date(displayYear, displayMonth, 0).getDate();
 
@@ -139,7 +170,7 @@ function renderCalendar() {
          badge.textContent = String(dayCommits.length);
          dayHeader.appendChild(badge);
 
-         const branchText = parseBranchFromRefs(dayCommits[0].refs || '');
+         const branchText = getCommitBranchLabel(dayCommits[0]) || formatBranchScope(dayCommits[0]);
          if (branchText) {
             const branchDiv = document.createElement('div');
             branchDiv.className = 'dayBranch';
@@ -167,10 +198,11 @@ function shiftMonth(delta) {
 }
 
 function clearCommitInfo(text = 'Select a highlighted day to view commit details.') {
+   void text;
    activeCommit = null;
-   const panel = document.getElementById('commitInfo');
-   panel.className = 'empty';
-   panel.textContent = text;
+   activeCommitNote = '';
+   renderCompareState();
+   refreshSelectedDayCommitList();
 }
 
 function createInfoRow(label, value) {
@@ -201,6 +233,100 @@ function formatCommitTime(isoDate) {
    return d ? d.toLocaleTimeString() : isoDate;
 }
 
+function createCompareStateRow(label, commit, kind) {
+   const row = document.createElement('div');
+   row.className = 'compareStateRow';
+   if (kind) {
+      row.classList.add(kind);
+   }
+
+   const heading = document.createElement('div');
+   heading.className = 'compareStateLabel';
+   heading.textContent = label;
+   row.appendChild(heading);
+
+   const summary = document.createElement('div');
+   summary.className = 'compareStateSummary';
+   summary.textContent = shortHash(commit.hash) + '  ' + formatCommitTime(commit.date) + '  ' + (commit.author || 'unknown');
+   row.appendChild(summary);
+
+   const message = document.createElement('div');
+   message.className = 'compareStateMessage';
+   message.textContent = commit.message || '';
+   row.appendChild(message);
+
+   return row;
+}
+
+function renderCompareState() {
+   const panel = document.getElementById('compareState');
+   if (!panel) {
+      return;
+   }
+   if (!activeCommit && !compareBaseCommit) {
+      panel.className = 'empty';
+      panel.textContent = 'Select a commit to see compare state.';
+      return;
+   }
+
+   panel.className = '';
+   panel.innerHTML = '';
+
+   const title = document.createElement('div');
+   title.className = 'compareStateTitle';
+   title.textContent = 'Compare State';
+   panel.appendChild(title);
+
+   if (activeCommit) {
+      panel.appendChild(createCompareStateRow('Open Commit', activeCommit, 'selected'));
+   }
+   if (compareBaseCommit) {
+      panel.appendChild(createCompareStateRow('Compare Base', compareBaseCommit, 'base'));
+   }
+   if (activeCommit && compareBaseCommit && !isSameCommit(activeCommit, compareBaseCommit)) {
+      const hint = document.createElement('div');
+      hint.className = 'compareStateHint';
+      hint.textContent = 'Diff direction: ' + shortHash(compareBaseCommit.hash) + ' -> ' + shortHash(activeCommit.hash);
+      panel.appendChild(hint);
+   }
+}
+
+function createInlineCommitDetails(commit, note = '') {
+   const details = document.createElement('div');
+   details.className = 'dayCommitDetails';
+
+   const title = document.createElement('div');
+   title.className = 'dayCommitDetailsTitle';
+   title.textContent = 'Commit Details';
+   details.appendChild(title);
+
+   details.appendChild(createInfoRow('Message', commit.message || ''));
+   details.appendChild(createInfoRow('Author', commit.author || 'unknown'));
+   details.appendChild(createInfoRow('When', formatCommitDate(commit.date || 'unknown')));
+   details.appendChild(createInfoRow('Hash', commit.hash || 'unknown'));
+
+   const branchText = getCommitBranchLabel(commit);
+   if (branchText) {
+      details.appendChild(createInfoRow('Branch', branchText));
+   }
+
+   const scopeText = formatBranchScope(commit);
+   if (scopeText) {
+      details.appendChild(createInfoRow('Scope', scopeText));
+   }
+
+   if (compareBaseCommit) {
+      details.appendChild(createInfoRow('Compare Base', shortHash(compareBaseCommit.hash)));
+   }
+
+   if (note) {
+      details.appendChild(createInfoRow('Action', note));
+   }
+
+   details.appendChild(createCommitActions(commit));
+   return details;
+}
+
 function createCommitActions(commit, onSelect) {
    const specs = [
       { text: 'Open Snapshot', title: '',                    note: 'Opening snapshot',              cmd: 'openCommit' },
@@ -226,31 +352,9 @@ function createCommitActions(commit, onSelect) {
 
 function showCommitInfo(commit, note = '') {
    activeCommit = commit || null;
-   const panel = document.getElementById('commitInfo');
-   panel.className = '';
-   panel.innerHTML = '';
-
-   const title = document.createElement('div');
-   title.className = 'infoTitle';
-   title.textContent = 'Commit Details';
-   panel.appendChild(title);
-
-   panel.appendChild(createInfoRow('Message', commit.message || ''));
-   panel.appendChild(createInfoRow('Author', commit.author || 'unknown'));
-   panel.appendChild(createInfoRow('When', formatCommitDate(commit.date || 'unknown')));
-   panel.appendChild(createInfoRow('Hash', commit.hash || 'unknown'));
-   const branchText = parseBranchFromRefs(commit.refs || '');
-   if (branchText) {
-      panel.appendChild(createInfoRow('Branch', branchText));
-   }
-   if (compareBaseCommit) {
-      panel.appendChild(createInfoRow('Compare Base', shortHash(compareBaseCommit.hash)));
-   }
-   if (note) {
-      panel.appendChild(createInfoRow('Action', note));
-   }
-
-   panel.appendChild(createCommitActions(commit));
+   activeCommitNote = note || '';
+   renderCompareState();
+   refreshSelectedDayCommitList();
 }
 
 function clearDayCommitList(text = 'Select a day with multiple commits to see all options.') {
@@ -259,6 +363,13 @@ function clearDayCommitList(text = 'Select a day with multiple commits to see al
    const panel = document.getElementById('dayCommitList');
    panel.className = 'empty';
    panel.textContent = text;
+}
+
+function refreshSelectedDayCommitList() {
+   if (!selectedDayKey || selectedDayCommits.length === 0) {
+      return;
+   }
+   renderDayCommitList(selectedDayKey, selectedDayCommits, activeCommit ? activeCommit.hash : '');
 }
 
 function renderDayCommitList(date, options, selectedHash = '') {
@@ -277,8 +388,13 @@ function renderDayCommitList(date, options, selectedHash = '') {
    selectedDayCommits.forEach(commit => {
       const item = document.createElement('div');
       item.className = 'dayCommitItem';
-      if (selectedHash && commit.hash === selectedHash) {
+      const isActiveInList = !!selectedHash && commit.hash === selectedHash;
+      const isCompareBase = isSameCommit(commit, compareBaseCommit);
+      if (isActiveInList) {
          item.classList.add('active');
+      }
+      if (isCompareBase) {
+         item.classList.add('compareBase');
       }
 
       const body = document.createElement('div');
@@ -294,13 +410,58 @@ function renderDayCommitList(date, options, selectedHash = '') {
       message.textContent = commit.message || '';
       body.appendChild(message);
 
-      body.onclick = () => {
+      const branchText = getCommitBranchLabel(commit);
+      const scopeText = formatBranchScope(commit);
+      const tags = document.createElement('div');
+      tags.className = 'dayCommitTags';
+      let hasTag = false;
+      if (isActiveInList) {
+         const selectedTag = document.createElement('span');
+         selectedTag.className = 'commitTag stateTag openTag';
+         selectedTag.textContent = 'Open';
+         tags.appendChild(selectedTag);
+         hasTag = true;
+      }
+      if (isCompareBase) {
+         const compareBaseTag = document.createElement('span');
+         compareBaseTag.className = 'commitTag stateTag baseTag';
+         compareBaseTag.textContent = 'Compare Base';
+         tags.appendChild(compareBaseTag);
+         hasTag = true;
+      }
+      if (branchText) {
+         const branchTag = document.createElement('span');
+         branchTag.className = 'commitTag branchTag';
+         branchTag.textContent = branchText;
+         tags.appendChild(branchTag);
+         hasTag = true;
+      }
+      if (scopeText) {
+         const scopeTag = document.createElement('span');
+         scopeTag.className = 'commitTag ' + (commit.branchScope === 'current' ? 'scopeCurrent' : 'scopeOther');
+         scopeTag.textContent = scopeText;
+         tags.appendChild(scopeTag);
+         hasTag = true;
+      }
+      if (hasTag) {
+         body.appendChild(tags);
+      }
+
+      const selectCommit = () => {
          showCommitInfo(commit);
-         renderDayCommitList(date, selectedDayCommits, commit.hash);
+      };
+      body.onclick = selectCommit;
+      body.tabIndex = 0;
+      body.onkeydown = event => {
+         if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectCommit();
+         }
       };
       item.appendChild(body);
-
-      item.appendChild(createCommitActions(commit, () => renderDayCommitList(date, selectedDayCommits, commit.hash)));
+      if (isActiveInList) {
+         item.appendChild(createInlineCommitDetails(commit, activeCommitNote));
+      }
       item.oncontextmenu = event => {
          event.preventDefault();
          showCommitContextMenu(event, commit, selectedDayCommits.length);
@@ -341,6 +502,7 @@ function showCommitContextMenu(event, commit, commitCountForDay = 1) {
       return;
    }
    activeCommit = commit;
+   activeCommitNote = '';
    const menu = document.getElementById('contextMenu');
    menu.innerHTML = '';
 
@@ -364,6 +526,7 @@ function showCommitContextMenu(event, commit, commitCountForDay = 1) {
    appendContextMenuButton(menu, 'Set ' + shortHash(commit.hash) + ' as Compare Base', () => {
       compareBaseCommit = commit;
       showCommitInfo(commit, 'Compare base updated');
+      refreshSelectedDayCommitList();
       setStatus('Compare base set to ' + shortHash(commit.hash) + '.');
    });
 
@@ -388,6 +551,7 @@ function showCommitContextMenu(event, commit, commitCountForDay = 1) {
       } else {
          clearCommitInfo();
       }
+      refreshSelectedDayCommitList();
       setStatus('Compare base cleared.');
    }, !compareBaseCommit);
 
@@ -401,33 +565,53 @@ function showCommitContextMenu(event, commit, commitCountForDay = 1) {
 function requestCurrentFileCommits() {
    hideContextMenu();
    clearDayCommitList('Loading day commits...');
+   const requestId = ++activeRequestId;
    if (!currentFileUri) {
-      setStatus('Resolving active file...');
+      setStatus('Resolving active file...', 'loading');
       clearCommitInfo('Trying to detect active file...');
       vscode.postMessage({command:'requestActiveFile'});
       return;
    }
-   setStatus('Loading commits...');
+   setStatus('Loading commits...', 'loading');
    clearCommitInfo('Loading commit details...');
-   vscode.postMessage({command:'requestCommits', fileUri: currentFileUri});
+   vscode.postMessage({command:'requestCommits', fileUri: currentFileUri, requestId});
 }
 
 window.addEventListener('message', event => {
    const msg = event.data;
    if (msg.command === 'setFile') {
-      currentFileUri = msg.fileUri || null;
+      const nextFileUri = msg.fileUri || null;
+      if (nextFileUri === currentFileUri) {
+         return;
+      }
+      currentFileUri = nextFileUri;
       compareBaseCommit = null;
       activeCommit = null;
+      activeCommitNote = '';
+      renderCompareState();
       requestCurrentFileCommits();
    } else if (msg.command === 'commits') {
+      if (isStaleRequestMessage(msg)) {
+         return;
+      }
+      if (msg.fileUri && msg.fileUri !== currentFileUri) {
+         return;
+      }
       indexCommits(msg.commits);
       resetDisplayMonthToLatestCommit();
       renderCalendar();
       const count = Array.isArray(msg.commits) ? msg.commits.length : 0;
-      setStatus(count > 0 ? 'Loaded ' + count + ' commit(s).' : 'No commits found for this file in the current branch.');
+      if (typeof msg.statusMessage === 'string' && msg.statusMessage) {
+         setStatus(msg.statusMessage, msg.statusLevel || 'info');
+      } else {
+         setStatus(count > 0 ? 'Loaded ' + count + ' commit(s).' : 'No commits found for this file across local and remote branches.');
+      }
       clearCommitInfo(count > 0 ? 'Select a highlighted day to view commit details.' : 'No commit details available for this file.');
       clearDayCommitList(count > 0 ? 'Select a day to list all commits for that day.' : 'No day options available for this file.');
    } else if (msg.command === 'status') {
+      if (isStaleRequestMessage(msg)) {
+         return;
+      }
       setStatus(msg.message, msg.level);
    }
 });
@@ -440,19 +624,14 @@ function onDateClick(date) {
    document.querySelectorAll('.dayCell.selected').forEach(el => el.classList.remove('selected'));
    const dayBtn = document.querySelector('.dayCell[data-date="' + date + '"]');
    if (dayBtn) dayBtn.classList.add('selected');
+   activeCommit = options[0];
+   activeCommitNote = '';
+   renderCompareState();
    renderDayCommitList(date, options, options[0].hash);
-   showCommitInfo(options[0]);
 }
 document.getElementById('prevMonth').addEventListener('click', () => shiftMonth(-1));
 document.getElementById('nextMonth').addEventListener('click', () => shiftMonth(1));
 document.getElementById('reloadHistoryButton').addEventListener('click', () => requestCurrentFileCommits());
-document.getElementById('commitInfo').addEventListener('contextmenu', event => {
-   if (!activeCommit) {
-      return;
-   }
-   event.preventDefault();
-   showCommitContextMenu(event, activeCommit, 1);
-});
 window.addEventListener('click', () => hideContextMenu());
 window.addEventListener('blur', () => hideContextMenu());
 window.addEventListener('scroll', () => hideContextMenu(), true);
@@ -464,3 +643,4 @@ window.addEventListener('keydown', event => {
 renderWeekdays();
 resetDisplayMonthToLatestCommit();
 renderCalendar();
+renderCompareState();

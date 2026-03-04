@@ -69,10 +69,6 @@ function enforceHistoryEditorReadOnly(editor) {
 	if (!editor || editor.document.uri.scheme !== HISTORY_SCHEME) {
 		return;
 	}
-	if (editor.options.readOnly) {
-		return;
-	}
-	editor.options = { ...editor.options, readOnly: true };
 }
 
 /**
@@ -132,15 +128,76 @@ class CalendarViewProvider {
 	constructor(context) {
 		this._context = context;
 		this._webviewView = null;
+		this._lastPostedFileUri = null;
+		this._latestCommitRequestId = 0;
 		log('CalendarViewProvider: created', { extensionPath: context.extensionPath });
 	}
 
 	/**
 	 * @param {string} message
-	 * @param {'info' | 'error'} level
+	 * @param {'info' | 'error' | 'loading'} level
+	 * @param {number | null} requestId
 	 */
-	postWebviewStatus(message, level = 'info') {
-		this._webviewView?.webview.postMessage({ command: 'status', message, level });
+	postWebviewStatus(message, level = 'info', requestId = null) {
+		const payload = { command: 'status', message, level };
+		if (Number.isInteger(requestId)) {
+			payload.requestId = requestId;
+		}
+		this._webviewView?.webview.postMessage(payload);
+	}
+
+	/**
+	 * @param {number | null | undefined} requestId
+	 */
+	normalizeRequestId(requestId) {
+		return Number.isInteger(requestId) ? requestId : null;
+	}
+
+	/**
+	 * @param {number | null} requestId
+	 */
+	isCommitRequestStale(requestId) {
+		return Number.isInteger(requestId) && requestId !== this._latestCommitRequestId;
+	}
+
+	/**
+	 * @param {string | null} fileUri
+	 * @param {boolean} force
+	 */
+	postActiveFileToWebview(fileUri, force = false) {
+		if (!this._webviewView) {
+			return false;
+		}
+		if (!force && this._lastPostedFileUri === fileUri) {
+			log('postActiveFileToWebview: skipped duplicate file', fileUri);
+			return false;
+		}
+		this._lastPostedFileUri = fileUri;
+		this._webviewView.webview.postMessage({ command: 'setFile', fileUri });
+		return true;
+	}
+
+	/**
+	 * @param {string | null} fileUri
+	 * @param {number | null} requestId
+	 * @param {Array<unknown>} commits
+	 * @param {string} statusMessage
+	 * @param {'info' | 'error'} statusLevel
+	 */
+	postCommitsResult(fileUri, requestId, commits, statusMessage, statusLevel = 'info') {
+		if (this.isCommitRequestStale(requestId)) {
+			log('postCommitsResult: ignored stale request result', { requestId, latest: this._latestCommitRequestId, fileUri });
+			return false;
+		}
+		this._webviewView?.webview.postMessage({
+			command: 'commits',
+			fileUri,
+			requestId,
+			commits,
+			statusMessage,
+			statusLevel
+		});
+		return true;
 	}
 
 	/**
@@ -162,10 +219,10 @@ class CalendarViewProvider {
 			try {
 				switch (message.command) {
 					case 'requestCommits':
-						await this.provideCommits(message.fileUri);
+						await this.provideCommits(message.fileUri, message.requestId);
 						break;
 					case 'requestActiveFile':
-						this.sendActiveFileToWebview();
+						this.sendActiveFileToWebview(true);
 						break;
 					case 'openCommit':
 						await this.openCommit(message.hash, message.fileUri);
@@ -191,72 +248,115 @@ class CalendarViewProvider {
 		});
 		webviewView.onDidDispose(() => {
 			log('resolveWebviewView: webview disposed');
+			this._webviewView = null;
+			this._lastPostedFileUri = null;
 		});
 		webviewView.onDidChangeVisibility(() => {
 			if (webviewView.visible) {
 				log('resolveWebviewView: webview became visible, refreshing active file');
-				this.sendActiveFileToWebview();
+				this.sendActiveFileToWebview(true);
 			}
 		});
 
-		this.sendActiveFileToWebview();
+		this.sendActiveFileToWebview(true);
 	}
 
-	sendActiveFileToWebview() {
+	sendActiveFileToWebview(force = false) {
 		const editor = vscode.window.activeTextEditor;
 		if (editor && editor.document.uri.scheme === 'file') {
 			const fileUri = editor.document.uri.toString();
-			log('sendActiveFileToWebview: posting active file', fileUri);
-			this._webviewView?.webview.postMessage({ command: 'setFile', fileUri });
+			const posted = this.postActiveFileToWebview(fileUri, force);
+			log(posted ? 'sendActiveFileToWebview: posted active file' : 'sendActiveFileToWebview: active file already posted', fileUri);
 			return;
 		}
 		log('sendActiveFileToWebview: no active file editor found');
 		this.postWebviewStatus('No active file selected.', 'error');
 	}
 
-	async provideCommits(fileUri) {
-		log('provideCommits: start', fileUri);
+	async provideCommits(fileUri, requestId = null) {
+		const normalizedRequestId = this.normalizeRequestId(requestId);
+		if (Number.isInteger(normalizedRequestId) && normalizedRequestId > this._latestCommitRequestId) {
+			this._latestCommitRequestId = normalizedRequestId;
+		}
+		log('provideCommits: start', { fileUri, requestId: normalizedRequestId });
+		if (this.isCommitRequestStale(normalizedRequestId)) {
+			log('provideCommits: stale request ignored before processing', { requestId: normalizedRequestId, latest: this._latestCommitRequestId, fileUri });
+			return;
+		}
 		if (!fileUri) {
-			this.postWebviewStatus('No file selected.');
-			this._webviewView?.webview.postMessage({ command: 'commits', commits: [] });
+			this.postCommitsResult(fileUri, normalizedRequestId, [], 'No file selected.', 'error');
 			return;
 		}
 		const uri = vscode.Uri.parse(fileUri);
 		if (uri.scheme !== 'file') {
-			this.postWebviewStatus(`Unsupported URI scheme: ${uri.scheme}`, 'error');
-			this._webviewView?.webview.postMessage({ command: 'commits', commits: [] });
+			this.postCommitsResult(fileUri, normalizedRequestId, [], `Unsupported URI scheme: ${uri.scheme}`, 'error');
 			return;
 		}
 		const repoRoot = await this.getRepositoryRootForUri(uri);
+		if (this.isCommitRequestStale(normalizedRequestId)) {
+			log('provideCommits: stale request ignored after repository resolution', { requestId: normalizedRequestId, latest: this._latestCommitRequestId, fileUri });
+			return;
+		}
 		if (!repoRoot) {
 			log('provideCommits: no matching repository', { fileUri });
-			this.postWebviewStatus('No Git repository found for this file. Open the repository root or enable Git parent repository discovery.');
-			this._webviewView?.webview.postMessage({ command: 'commits', commits: [] });
+			this.postCommitsResult(
+				fileUri,
+				normalizedRequestId,
+				[],
+				'No Git repository found for this file. Open the repository root or enable Git parent repository discovery.',
+				'error'
+			);
 			return;
 		}
 		const relPath = path.relative(repoRoot, uri.fsPath).replace(/\\/g, '/');
 		if (relPath.startsWith('..')) {
 			log('provideCommits: file is outside repository root', { repoRoot, filePath: uri.fsPath });
-			this.postWebviewStatus('The active file is outside the detected repository root.');
-			this._webviewView?.webview.postMessage({ command: 'commits', commits: [] });
+			this.postCommitsResult(fileUri, normalizedRequestId, [], 'The active file is outside the detected repository root.', 'error');
 			return;
 		}
-		this.postWebviewStatus(`Loading commits for ${relPath}...`);
-			const commitLogRaw = await this.execGit(repoRoot, [
+		this.postWebviewStatus(`Loading commits for ${relPath}...`, 'loading', normalizedRequestId);
+		const [allRefsLogRaw, currentBranchLogRaw, currentBranchNameRaw] = await Promise.all([
+			this.execGit(repoRoot, [
 				'log',
+				'--all',
+				'--decorate=short',
 				'--follow',
 				'--date=iso-strict',
 				`--pretty=format:%H%x1f%aI%x1f%an <%ae>%x1f%s%x1f%D%x1e`,
 				'--',
 				relPath
-			]);
-		const commits = parseGitLogOutput(commitLogRaw, fileUri);
-		log('provideCommits: commits resolved', { relPath, commitCount: commits.length });
-		this._webviewView?.webview.postMessage({ command: 'commits', commits });
+			]),
+			this.execGit(repoRoot, [
+				'log',
+				'--follow',
+				'--pretty=format:%H',
+				'--',
+				relPath
+			]),
+			this.execGit(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])
+		]);
+		if (this.isCommitRequestStale(normalizedRequestId)) {
+			log('provideCommits: stale request ignored after git log execution', { requestId: normalizedRequestId, latest: this._latestCommitRequestId, relPath });
+			return;
+		}
+		const allCommits = parseGitLogOutput(allRefsLogRaw, fileUri);
+		const currentBranchHashes = new Set(
+			currentBranchLogRaw
+				.split(/\r?\n/)
+				.map(line => line.trim())
+				.filter(Boolean)
+		);
+		const currentBranchName = currentBranchNameRaw.trim();
+		const commits = allCommits.map(commit => ({
+			...commit,
+			branchScope: currentBranchHashes.has(commit.hash) ? 'current' : 'other',
+			currentBranchName
+		}));
+		log('provideCommits: commits resolved', { relPath, commitCount: commits.length, currentBranchName });
 		if (commits.length === 0) {
-			this.postWebviewStatus('No commits found for this file in the current branch.');
+			this.postCommitsResult(fileUri, normalizedRequestId, commits, 'No commits found for this file across local and remote branches.');
 		} else {
-			this.postWebviewStatus(`Loaded ${commits.length} commit(s) for ${relPath}.`);
+			this.postCommitsResult(fileUri, normalizedRequestId, commits, `Loaded ${commits.length} commit(s) for ${relPath}.`);
 		}
 	}
 
@@ -299,12 +399,16 @@ class CalendarViewProvider {
 	async openCommit(hash, fileUri) {
 		log('openCommit: start', { hash, fileUri });
 		const { uri, repoRoot, relPath } = await this.resolveFileContext(fileUri);
-		const content = await this.getCommitFileContent(repoRoot, hash, relPath);
+		const pathInfo = await this.getFilePathsForCommitAndParent(repoRoot, hash, relPath);
+		if (!pathInfo.pathAtHash) {
+			throw new Error(`Commit ${hash.slice(0, 7)} does not contain ${relPath}.`);
+		}
+		const content = await this.getCommitFileContent(repoRoot, hash, pathInfo.pathAtHash);
 		const languageId = await this.getLanguageIdForUri(uri);
 		let doc;
 
 		if (historySnapshotStore) {
-			const snapshotUri = historySnapshotStore.createUri(relPath, hash);
+			const snapshotUri = historySnapshotStore.createUri(pathInfo.pathAtHash, hash);
 			historySnapshotStore.store(snapshotUri, content);
 			doc = await vscode.workspace.openTextDocument(snapshotUri);
 		} else {
@@ -319,22 +423,25 @@ class CalendarViewProvider {
 			}
 		}
 
-		const editor = await vscode.window.showTextDocument(doc, { preview: true });
-		editor.options = { ...editor.options, readOnly: true };
-		vscode.window.setStatusBarMessage(`Calgit history snapshot ${hash.slice(0, 7)} • ${relPath}`, 5000);
-		log('openCommit: completed', { relPath, languageId, uri: doc.uri.toString() });
+		await vscode.window.showTextDocument(doc, { preview: true });
+		vscode.window.setStatusBarMessage(`Calgit history snapshot ${hash.slice(0, 7)} • ${pathInfo.pathAtHash}`, 5000);
+		log('openCommit: completed', { relPath: pathInfo.pathAtHash, languageId, uri: doc.uri.toString() });
 	}
 
 	async openDiffWithCurrent(hash, fileUri) {
 		log('openDiffWithCurrent: start', { hash, fileUri });
 		const { uri, repoRoot, relPath } = await this.resolveFileContext(fileUri);
 		const languageId = await this.getLanguageIdForUri(uri);
-		const commitContent = await this.getCommitFileContent(repoRoot, hash, relPath);
-		const leftDoc = await this.openSnapshotDocument(relPath, `${hash}-snapshot`, commitContent, languageId);
-		const title = `Calgit ${relPath}: ${hash.slice(0, 7)} <-> Working Tree`;
+		const pathInfo = await this.getFilePathsForCommitAndParent(repoRoot, hash, relPath);
+		if (!pathInfo.pathAtHash) {
+			throw new Error(`Commit ${hash.slice(0, 7)} does not contain ${relPath}.`);
+		}
+		const commitContent = await this.getCommitFileContent(repoRoot, hash, pathInfo.pathAtHash);
+		const leftDoc = await this.openSnapshotDocument(pathInfo.pathAtHash, `${hash}-snapshot`, commitContent, languageId);
+		const title = `Calgit ${pathInfo.pathAtHash}: ${hash.slice(0, 7)} <-> Working Tree`;
 		await vscode.commands.executeCommand('vscode.diff', leftDoc.uri, uri, title, { preview: true });
 		vscode.window.setStatusBarMessage(`Calgit diff opened: ${hash.slice(0, 7)} vs working tree`, 4000);
-		log('openDiffWithCurrent: completed', { relPath, hash });
+		log('openDiffWithCurrent: completed', { relPath: pathInfo.pathAtHash, hash });
 	}
 
 	async openDiffWithPrevious(hash, fileUri) {
@@ -350,14 +457,27 @@ class CalendarViewProvider {
 		if (!previousHash) {
 			throw new Error(`Commit ${hash.slice(0, 7)} has no parent to diff against.`);
 		}
-		const previousContent = await this.getCommitFileContent(repoRoot, previousHash, relPath);
-		const currentCommitContent = await this.getCommitFileContent(repoRoot, hash, relPath);
-		const leftDoc = await this.openSnapshotDocument(relPath, `${previousHash}-base`, previousContent, languageId);
-		const rightDoc = await this.openSnapshotDocument(relPath, `${hash}-target`, currentCommitContent, languageId);
-		const title = `Calgit ${relPath}: ${previousHash.slice(0, 7)} <-> ${hash.slice(0, 7)}`;
+		const pathInfo = await this.getFilePathsForCommitAndParent(repoRoot, hash, relPath);
+		if (!pathInfo.pathAtHash) {
+			throw new Error(`Commit ${hash.slice(0, 7)} does not contain this file version.`);
+		}
+		if (!pathInfo.pathAtParent) {
+			throw new Error(`Commit ${hash.slice(0, 7)} has no previous file version to diff against.`);
+		}
+		const previousContent = await this.getCommitFileContent(repoRoot, previousHash, pathInfo.pathAtParent);
+		const currentCommitContent = await this.getCommitFileContent(repoRoot, hash, pathInfo.pathAtHash);
+		const leftDoc = await this.openSnapshotDocument(pathInfo.pathAtParent, `${previousHash}-base`, previousContent, languageId);
+		const rightDoc = await this.openSnapshotDocument(pathInfo.pathAtHash, `${hash}-target`, currentCommitContent, languageId);
+		const titlePath = pathInfo.pathAtParent === pathInfo.pathAtHash ? pathInfo.pathAtHash : `${pathInfo.pathAtParent} -> ${pathInfo.pathAtHash}`;
+		const title = `Calgit ${titlePath}: ${previousHash.slice(0, 7)} <-> ${hash.slice(0, 7)}`;
 		await vscode.commands.executeCommand('vscode.diff', leftDoc.uri, rightDoc.uri, title, { preview: true });
 		vscode.window.setStatusBarMessage(`Calgit diff opened: ${hash.slice(0, 7)} vs previous`, 4000);
-		log('openDiffWithPrevious: completed', { relPath, previousHash, hash });
+		log('openDiffWithPrevious: completed', {
+			relPathAtParent: pathInfo.pathAtParent,
+			relPathAtHash: pathInfo.pathAtHash,
+			previousHash,
+			hash
+		});
 	}
 
 	async openDiffBetweenCommits(leftHash, rightHash, fileUri) {
@@ -370,14 +490,27 @@ class CalendarViewProvider {
 		}
 		const { uri, repoRoot, relPath } = await this.resolveFileContext(fileUri);
 		const languageId = await this.getLanguageIdForUri(uri);
-		const leftContent = await this.getCommitFileContent(repoRoot, leftHash, relPath);
-		const rightContent = await this.getCommitFileContent(repoRoot, rightHash, relPath);
-		const leftDoc = await this.openSnapshotDocument(relPath, `${leftHash}-left`, leftContent, languageId);
-		const rightDoc = await this.openSnapshotDocument(relPath, `${rightHash}-right`, rightContent, languageId);
-		const title = `Calgit ${relPath}: ${leftHash.slice(0, 7)} <-> ${rightHash.slice(0, 7)}`;
+		const leftPathInfo = await this.getFilePathsForCommitAndParent(repoRoot, leftHash, relPath);
+		const rightPathInfo = await this.getFilePathsForCommitAndParent(repoRoot, rightHash, relPath);
+		if (!leftPathInfo.pathAtHash || !rightPathInfo.pathAtHash) {
+			throw new Error('Unable to resolve file path for one of the selected commits.');
+		}
+		const leftContent = await this.getCommitFileContent(repoRoot, leftHash, leftPathInfo.pathAtHash);
+		const rightContent = await this.getCommitFileContent(repoRoot, rightHash, rightPathInfo.pathAtHash);
+		const leftDoc = await this.openSnapshotDocument(leftPathInfo.pathAtHash, `${leftHash}-left`, leftContent, languageId);
+		const rightDoc = await this.openSnapshotDocument(rightPathInfo.pathAtHash, `${rightHash}-right`, rightContent, languageId);
+		const titlePath = leftPathInfo.pathAtHash === rightPathInfo.pathAtHash
+			? leftPathInfo.pathAtHash
+			: `${leftPathInfo.pathAtHash} <-> ${rightPathInfo.pathAtHash}`;
+		const title = `Calgit ${titlePath}: ${leftHash.slice(0, 7)} <-> ${rightHash.slice(0, 7)}`;
 		await vscode.commands.executeCommand('vscode.diff', leftDoc.uri, rightDoc.uri, title, { preview: true });
 		vscode.window.setStatusBarMessage(`Calgit diff opened: ${leftHash.slice(0, 7)} vs ${rightHash.slice(0, 7)}`, 4000);
-		log('openDiffBetweenCommits: completed', { relPath, leftHash, rightHash });
+		log('openDiffBetweenCommits: completed', {
+			leftHash,
+			rightHash,
+			leftPath: leftPathInfo.pathAtHash,
+			rightPath: rightPathInfo.pathAtHash
+		});
 	}
 
 	/**
@@ -413,6 +546,80 @@ class CalendarViewProvider {
 		} catch {
 			throw new Error(`Unable to load ${relPath} at ${hash.slice(0, 7)}.`);
 		}
+	}
+
+	/**
+	 * @param {string} statusCode
+	 * @param {string[]} paths
+	 * @param {string} fallbackPath
+	 */
+	resolvePathsFromNameStatus(statusCode, paths, fallbackPath) {
+		if (!statusCode || paths.length === 0) {
+			return { pathAtHash: fallbackPath, pathAtParent: fallbackPath };
+		}
+		if (statusCode.startsWith('R') || statusCode.startsWith('C')) {
+			if (paths.length >= 2) {
+				return { pathAtHash: paths[1], pathAtParent: paths[0] };
+			}
+			return { pathAtHash: fallbackPath, pathAtParent: fallbackPath };
+		}
+		if (statusCode.startsWith('A')) {
+			return { pathAtHash: paths[0], pathAtParent: null };
+		}
+		if (statusCode.startsWith('D')) {
+			return { pathAtHash: null, pathAtParent: paths[0] };
+		}
+		return { pathAtHash: paths[0], pathAtParent: paths[0] };
+	}
+
+	/**
+	 * @param {string} repoRoot
+	 * @param {string} hash
+	 * @param {string} relPath
+	 */
+	async getFilePathsForCommitAndParent(repoRoot, hash, relPath) {
+		const fallback = { pathAtHash: relPath, pathAtParent: relPath };
+		let raw = '';
+		try {
+			raw = await this.execGit(repoRoot, ['log', '--follow', '--name-status', '--format=%H', '--', relPath]);
+		} catch (error) {
+			log('getFilePathsForCommitAndParent: failed to resolve from name-status log, using fallback', { hash, relPath, error });
+			return fallback;
+		}
+		if (!raw.trim()) {
+			return fallback;
+		}
+		const lines = raw.split(/\r?\n/);
+		const commitHashPattern = /^[0-9a-f]{40}$/;
+		let currentCommitHash = '';
+		let currentStatusLines = [];
+		const evaluateCurrent = () => {
+			if (currentCommitHash !== hash) {
+				return null;
+			}
+			const statusLine = currentStatusLines.find(line => line.trim().length > 0) || '';
+			const [statusCode = '', ...paths] = statusLine.split('\t').map(part => part.trim()).filter(Boolean);
+			return this.resolvePathsFromNameStatus(statusCode, paths, relPath);
+		};
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (commitHashPattern.test(trimmed)) {
+				const evaluated = evaluateCurrent();
+				if (evaluated) {
+					return evaluated;
+				}
+				currentCommitHash = trimmed;
+				currentStatusLines = [];
+				continue;
+			}
+			if (!trimmed) {
+				continue;
+			}
+			if (currentCommitHash) {
+				currentStatusLines.push(line);
+			}
+		}
+		return evaluateCurrent() || fallback;
 	}
 
 	/**
@@ -507,12 +714,17 @@ class CalendarViewProvider {
 	}
 
 	async updateForEditor(editor) {
+		if (!this._webviewView || !this._webviewView.visible) {
+			log('updateForEditor: skipped because webview is not visible');
+			return;
+		}
 		if (!editor || editor.document.uri.scheme !== 'file') {
 			log('updateForEditor: skipped non-file or missing editor');
 			return;
 		}
-		log('updateForEditor: posting file uri', editor.document.uri.toString());
-		this._webviewView?.webview.postMessage({ command: 'setFile', fileUri: editor.document.uri.toString() });
+		const fileUri = editor.document.uri.toString();
+		const posted = this.postActiveFileToWebview(fileUri);
+		log(posted ? 'updateForEditor: posted file uri' : 'updateForEditor: skipped duplicate file uri', fileUri);
 	}
 
 	getHtmlForWebview(webview) {
@@ -540,11 +752,11 @@ class CalendarViewProvider {
 	</div>
 	<div id="weekdayRow" class="weekdayRow"></div>
 	<div id="calendarGrid" class="calendarGrid"></div>
-</div>
-<div id="commitInfo" class="empty">Select a highlighted day to view commit details.</div>
-<div id="dayCommitList" class="empty">Select a day with multiple commits to see all options.</div>
-<div id="contextMenu" class="contextMenu hidden"></div>
-<script nonce="${nonce}" src="${scriptUri}"></script>
+	</div>
+	<div id="compareState" class="empty">Select a commit to see compare state.</div>
+	<div id="dayCommitList" class="empty">Select a day with multiple commits to see all options.</div>
+	<div id="contextMenu" class="contextMenu hidden"></div>
+	<script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
 	}
