@@ -2,6 +2,10 @@
   "name": "calgit",
   "displayName": "Calgit",
   "description": "Calendar of file changes in git",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MOkrucky/calgit.git"
+  },
   "license": "GPL-3.0-or-later",
   "publisher": "MOkrucky",
   "version": "0.0.1",

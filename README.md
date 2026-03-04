@@ -44,7 +44,6 @@ Publisher: MOkrucky
 ## Commands
 
 - `Calgit: Show Debug Log` (`calgit.showDebugLog`)
-- `Hello World` (`calgit.helloWorld`, kept for compatibility)
 
 ## Notes
 
@@ -52,32 +51,6 @@ Publisher: MOkrucky
 - If no repository is found through the VS Code Git API, Calgit falls back to Git CLI detection.
 - Commit history is branch-specific and reflects the currently checked-out branch.
 
-## Development
-
-```bash
-npm install
-npm run lint
-npm test
-```
-
-Run the extension in development:
-
-1. Open this project in VS Code.
-2. Press `F5` to launch an Extension Development Host.
-
-## Packaging and Publishing
-
-Package:
-
-```bash
-npx @vscode/vsce package
-```
-
-Publish:
-
-```bash
-npx @vscode/vsce publish
-```
 
 ## Release Notes
 
