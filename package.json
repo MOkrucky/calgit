@@ -1,0 +1,62 @@
+{
+  "name": "calgit",
+  "displayName": "Calgit",
+  "description": "Calendar of file changes in git",
+  "license": "GPL-3.0-or-later",
+  "publisher": "MOkrucky",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:calgit.calendarView",
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "calgit.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "calgit.showDebugLog",
+        "title": "Calgit: Show Debug Log"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "calgit",
+          "title": "Calgit",
+          "icon": "resources/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "calgit": [
+        {
+          "type": "webview",
+          "id": "calgit.calendarView",
+          "name": "File Calendar"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "lint": "eslint extension.js test",
+    "pretest": "npm run lint",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.109.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "eslint": "^9.39.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
